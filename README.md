@@ -12,8 +12,8 @@
 - 近处（2500m 内）帆的精细网格默认保留，可在配置里 `DisableNearPass=true` 一并关闭。
 
 ### 2. 小火箭建造顺序（Rocket）
-- 原版 `DysonNode.ConstructSp()` 把火箭送来的结构点**先填节点本体，再分给框架**。
-- 本 mod 反转优先级：**先把该节点连接的所有框架填满，框架全满后才建节点本体**。
+- 原版 `DysonNode.ConstructSp()` 把火箭送来的结构点填满本节点后即开始建本节点的框架。
+- 本 mod 改为：**整颗戴森球的所有节点本体全部建成后，才开始给框架分配结构点**。
 - 火箭目标选择（`PickAutoNode`/`spReqOrder`）不需要改，它统计的是"节点+框架"总需求，天然兼容。
 
 ## 配置（BepInEx/config/byboy.dspopti.cfg）
@@ -25,7 +25,7 @@
 | Swarm.RingWidthFactor | 0.025 | 环带宽度系数（×轨道半径）|
 | Swarm.RingMinAlpha | 0.25 | 环带最低透明度 |
 | Swarm.RingAlphaScale | 0.6 | 环带基础透明度 |
-| Rocket.FramesFirst | true | 框架优先建造 |
+| Rocket.NodesFirst | true（原 FramesFirst）| 所有节点建成后才开始建框架 |
 
 游戏内 **F9** 可即时开关戴森云渲染优化。
 

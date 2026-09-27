@@ -33,7 +33,7 @@ namespace DspOptiMod
             RingMinAlpha = Config.Bind("Swarm", "RingMinAlpha", 0.25f, "环带最低透明度");
             RingAlphaScale = Config.Bind("Swarm", "RingAlphaScale", 0.6f, "环带基础透明度");
             FramesFirst = Config.Bind("Rocket", "FramesFirst", true,
-                "小火箭结构点优先建造框架，框架全满后才建造节点本体");
+                "小火箭：所有节点本体全部建成后才开始建造框架");
             RingSegments.Value = Mathf.Clamp(RingSegments.Value, 32, 512);
 
             new Harmony("byboy.dspopti").PatchAll(Assembly.GetExecutingAssembly());
@@ -52,12 +52,55 @@ namespace DspOptiMod
     }
 
     /// <summary>
-    /// 功能2：反转 ConstructSp 的分配顺序 —— 原版先填节点本体(sp)再分给框架(spA/spB)，
-    /// 这里改为先建框架，框架全部建满后才建节点本体。
+    /// 功能2：改变 ConstructSp 的分配顺序 —— 原版是"节点本体填满后，本节点的框架就能开始建"。
+    /// 这里改为：整颗戴森球【所有节点本体】全部建成后，才开始给框架分配结构点。
     /// </summary>
     [HarmonyPatch(typeof(DysonNode), "ConstructSp")]
     internal static class NodeConstructSpPatch
     {
+        private static DysonSphere FindSphere(DysonNode node)
+        {
+            var spheres = GameMain.data?.dysonSpheres;
+            if (spheres == null)
+            {
+                return null;
+            }
+            for (int s = 0; s < spheres.Length; s++)
+            {
+                DysonSphere sphere = spheres[s];
+                if (sphere == null) continue;
+                DysonSphereLayer layer = sphere.layersIdBased[node.layerId];
+                if (layer != null && layer.nodePool[node.id] == node)
+                {
+                    return sphere;
+                }
+            }
+            return null;
+        }
+
+        private static bool AllNodesBuilt(DysonSphere sphere)
+        {
+            DysonSphereLayer[] layers = sphere.layersIdBased;
+            for (int i = 1; i < layers.Length; i++)
+            {
+                DysonSphereLayer layer = layers[i];
+                if (layer == null || layer.id != i)
+                {
+                    continue;
+                }
+                DysonNode[] pool = layer.nodePool;
+                for (int j = 1; j < layer.nodeCursor; j++)
+                {
+                    DysonNode n = pool[j];
+                    if (n != null && n.id == j && n.sp < n.spMax)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
         private static bool Prefix(DysonNode __instance, ref object __result)
         {
             if (!DspOptiModPlugin.FramesFirst.Value)
@@ -67,27 +110,37 @@ namespace DspOptiMod
             lock (__instance)
             {
                 object result = null;
-                var frames = __instance.frames;
-                if (frames != null)
+                bool framesAllowed = false;
+                if (__instance.sp >= __instance.spMax)
                 {
-                    for (int i = __instance.frameTurn; i < __instance.frameTurn + frames.Count; i++)
+                    // 本节点已满，只有在全球节点都建成后才允许分给框架
+                    DysonSphere sphere = FindSphere(__instance);
+                    framesAllowed = sphere != null && AllNodesBuilt(sphere);
+                }
+                if (framesAllowed)
+                {
+                    var frames = __instance.frames;
+                    if (frames != null)
                     {
-                        int num = i % frames.Count;
-                        DysonFrame frame = frames[num];
-                        int half = frame.spMax >> 1;
-                        if (frame.nodeA == __instance && frame.spA < half)
+                        for (int i = __instance.frameTurn; i < __instance.frameTurn + frames.Count; i++)
                         {
-                            frame.spA++;
-                            __instance.frameTurn = num + 1;
-                            result = frame;
-                            break;
-                        }
-                        if (frame.nodeB == __instance && frame.spB < half)
-                        {
-                            frame.spB++;
-                            __instance.frameTurn = num + 1;
-                            result = frame;
-                            break;
+                            int num = i % frames.Count;
+                            DysonFrame frame = frames[num];
+                            int half = frame.spMax >> 1;
+                            if (frame.nodeA == __instance && frame.spA < half)
+                            {
+                                frame.spA++;
+                                __instance.frameTurn = num + 1;
+                                result = frame;
+                                break;
+                            }
+                            if (frame.nodeB == __instance && frame.spB < half)
+                            {
+                                frame.spB++;
+                                __instance.frameTurn = num + 1;
+                                result = frame;
+                                break;
+                            }
                         }
                     }
                 }
