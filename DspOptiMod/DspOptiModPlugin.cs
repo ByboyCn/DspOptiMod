@@ -325,85 +325,63 @@ namespace DspOptiMod
             {
                 return true;
             }
-
-            // ---- 与原版一致地计算太阳中心与本地旋转 ----
-            Vector3 sunPos = Vector3.zero;
-            Vector4 localRot4 = new Vector4(0f, 0f, 0f, 1f);
             StarData starData = __instance.starData;
             GameData gameData = __instance.gameData;
             if (starData == null || gameData == null)
             {
                 return false;
             }
-            PlanetData localPlanet = gameData.localPlanet;
-            Player mainPlayer = gameData.mainPlayer;
-            VectorLF3 starOffset = starData.uPosition;
-            if (localPlanet != null)
-            {
-                starOffset -= mainPlayer.uPosition;
-                starOffset = Maths.QInvRotateLF(localPlanet.runtimeRotation, starOffset);
-                starOffset += (VectorLF3)mainPlayer.position;
-                localRot4 = new Vector4(localPlanet.runtimeRotation.x, localPlanet.runtimeRotation.y,
-                    localPlanet.runtimeRotation.z, localPlanet.runtimeRotation.w);
-            }
-            else
-            {
-                starOffset -= mainPlayer.uPosition;
-            }
-            sunPos = (Vector3)starOffset;
-            if (DysonSphere.renderPlace == ERenderPlace.Starmap)
-            {
-                sunPos = (Vector3)((starData.uPosition - UIStarmap.viewTargetStatic) * 0.00025);
-            }
-            // Dysonmap 视角：原版 vector 保持 zero，环带以编辑器原点为中心
-            Quaternion invLocal = Quaternion.identity;
-            if (localPlanet != null && DysonSphere.renderPlace == ERenderPlace.Universe)
-            {
-                invLocal = Quaternion.Inverse(new Quaternion(localRot4.x, localRot4.y, localRot4.z, localRot4.w));
-            }
 
-            // ---- 每条轨道一条环带 ----
-            int segments = DspOptiModPlugin.RingSegments.Value;
-            float widthFactor = DspOptiModPlugin.RingWidthFactor.Value;
-            SailOrbit[] orbits = __instance.orbits;
-            Vector4[] orbitColors = __instance.orbitColorsHSVA;
-            ringMat.SetPass(0);
-            GL.Begin(GL.QUADS);
-            try
+            // ---- 环带只在戴森球编辑界面(云带视图)显示；星图/宇宙视角不画 ----
+            // 戴森编辑器里世界坐标 = 恒星本地坐标 * 0.00025（与原版帆/子弹一致）
+            bool drawRings = DysonSphere.renderPlace == ERenderPlace.Dysonmap;
+            float mapScale = 0.00025f;
+            if (drawRings)
             {
-                for (int i = 1; i < __instance.orbitCursor && i < orbits.Length; i++)
+                // ---- 每条轨道一条环带 ----
+                int segments = DspOptiModPlugin.RingSegments.Value;
+                float widthFactor = DspOptiModPlugin.RingWidthFactor.Value;
+                SailOrbit[] orbits = __instance.orbits;
+                Vector4[] orbitColors = __instance.orbitColorsHSVA;
+                Vector3 ringCenter = Vector3.zero; // Dysonmap 视角以编辑器原点为中心
+                ringMat.SetPass(0);
+                GL.Begin(GL.QUADS);
+                try
                 {
-                    if (orbits[i].id != i || orbits[i].count <= 0 || !orbits[i].enabled)
+                    for (int i = 1; i < __instance.orbitCursor && i < orbits.Length; i++)
                     {
-                        continue;
-                    }
-                    float radius = orbits[i].radius;
-                    Quaternion worldRot = invLocal * __instance.orbits[i].rotation;
-                    Color c = Color.HSVToRGB(orbitColors[i].x, orbitColors[i].y, orbitColors[i].z);
-                    float fill = Mathf.Clamp01(orbits[i].count / 6000f);
-                    c.a = Mathf.Max(DspOptiModPlugin.RingMinAlpha.Value,
-                        DspOptiModPlugin.RingAlphaScale.Value * (0.35f + 0.65f * fill));
-                    float width = Mathf.Max(radius * widthFactor, 40f);
-                    for (int k = 0; k < segments; k++)
-                    {
-                        float a0 = (float)k / segments * Mathf.PI * 2f;
-                        float a1 = (float)(k + 1) / segments * Mathf.PI * 2f;
-                        Vector3 p0 = worldRot * new Vector3(Mathf.Cos(a0) * radius, 0f, Mathf.Sin(a0) * radius);
-                        Vector3 p1 = worldRot * new Vector3(Mathf.Cos(a1) * radius, 0f, Mathf.Sin(a1) * radius);
-                        Vector3 n = worldRot * Vector3.up;
-                        // 沿切向的宽度方向
-                        Vector3 side = Vector3.Cross(n, (p1 - p0).normalized).normalized * width;
-                        GL.Color(c);
-                        GL.Vertex(sunPos + p0 - side);
-                        GL.Vertex(sunPos + p0 + side);
-                        GL.Vertex(sunPos + p1 + side);
-                        GL.Vertex(sunPos + p1 - side);
+                        if (orbits[i].id != i || orbits[i].count <= 0 || !orbits[i].enabled)
+                        {
+                            continue;
+                        }
+                        float radius = orbits[i].radius * mapScale;
+                        Quaternion worldRot = __instance.orbits[i].rotation;
+                        Color c = Color.HSVToRGB(orbitColors[i].x, orbitColors[i].y, orbitColors[i].z);
+                        float fill = Mathf.Clamp01(orbits[i].count / 6000f);
+                        c.a = Mathf.Max(DspOptiModPlugin.RingMinAlpha.Value,
+                            DspOptiModPlugin.RingAlphaScale.Value * (0.35f + 0.65f * fill));
+                        float width = radius * widthFactor;
+                        for (int k = 0; k < segments; k++)
+                        {
+                            float a0 = (float)k / segments * Mathf.PI * 2f;
+                            float a1 = (float)(k + 1) / segments * Mathf.PI * 2f;
+                            Vector3 p0 = worldRot * new Vector3(Mathf.Cos(a0) * radius, 0f, Mathf.Sin(a0) * radius);
+                            Vector3 p1 = worldRot * new Vector3(Mathf.Cos(a1) * radius, 0f, Mathf.Sin(a1) * radius);
+                            Vector3 n = worldRot * Vector3.up;
+                            // 沿切向的宽度方向
+                            Vector3 side = Vector3.Cross(n, (p1 - p0).normalized).normalized * width;
+                            GL.Color(c);
+                            GL.Vertex(ringCenter + p0 - side);
+                            GL.Vertex(ringCenter + p0 + side);
+                            GL.Vertex(ringCenter + p1 + side);
+                            GL.Vertex(ringCenter + p1 - side);
+                        }
                     }
                 }
-            }
-            finally
-            {
-                GL.End();
+                finally
+                {
+                    GL.End();
+                }
             }
 
             // ---- 保留原版的太阳帆子弹(发射轨迹)渲染 ----
