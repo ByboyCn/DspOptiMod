@@ -1,0 +1,8 @@
+ref/
+ref_ts_all.js
+bin/
+obj/
+*.zip
+tsupload*.py
+__pycache__/
+BepInEx/
