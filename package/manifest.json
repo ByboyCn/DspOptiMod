@@ -1,6 +1,6 @@
 {
   "name": "DspOptiMod",
-  "version_number": "1.2.0",
+  "version_number": "1.2.1",
   "website_url": "https://github.com/ByboyCn/DspOptiMod",
   "description": "Dyson Swarm render optimization (one glowing band per orbit) + rockets build all nodes first (exactly 30 per node, no overflow), frames only after every node is complete.",
   "dependencies": [

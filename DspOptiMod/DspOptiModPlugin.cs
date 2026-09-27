@@ -128,6 +128,13 @@ namespace DspOptiMod
                     }
                 }
             }
+            // 关键：节点阶段 autoNodes 已被逐个清空（每个节点下满 30 单即移出），
+            // 原版只在 OrderConstructSp 时补位；阶段切换后必须手动重选目标，
+            // 否则发射井永久待机、框架不再被打。
+            for (int k = sphere.GetAutoNodeCount(); k < 8; k++)
+            {
+                sphere.PickAutoNode();
+            }
         }
     }
 
