@@ -51,14 +51,13 @@ namespace DspOptiMod
         }
     }
 
-    /// <summary>
-    /// 功能2：改变 ConstructSp 的分配顺序 —— 原版是"节点本体填满后，本节点的框架就能开始建"。
-    /// 这里改为：整颗戴森球【所有节点本体】全部建成后，才开始给框架分配结构点。
-    /// </summary>
-    [HarmonyPatch(typeof(DysonNode), "ConstructSp")]
-    internal static class NodeConstructSpPatch
+    /// <summary>共用工具：定位节点所属戴森球 / 判断节点阶段是否结束。</summary>
+    internal static class DysonSphereUtil
     {
-        private static DysonSphere FindSphere(DysonNode node)
+        private static readonly System.Collections.Generic.HashSet<DysonSphere> FramesPhase =
+            new System.Collections.Generic.HashSet<DysonSphere>();
+
+        public static DysonSphere FindSphere(DysonNode node)
         {
             var spheres = GameMain.data?.dysonSpheres;
             if (spheres == null)
@@ -78,7 +77,7 @@ namespace DspOptiMod
             return null;
         }
 
-        private static bool AllNodesBuilt(DysonSphere sphere)
+        public static bool AllNodesBuilt(DysonSphere sphere)
         {
             DysonSphereLayer[] layers = sphere.layersIdBased;
             for (int i = 1; i < layers.Length; i++)
@@ -94,12 +93,80 @@ namespace DspOptiMod
                     DysonNode n = pool[j];
                     if (n != null && n.id == j && n.sp < n.spMax)
                     {
+                        FramesPhase.Remove(sphere);
                         return false;
                     }
                 }
             }
             return true;
         }
+
+        /// <summary>节点阶段刚结束时（只发生一次），按原版公式重算全戴森球所有节点的 _spReq，
+        /// 让发射井开始为框架下单。</summary>
+        public static void EnsureFramesPhaseRecalc(DysonSphere sphere)
+        {
+            if (!AllNodesBuilt(sphere) || FramesPhase.Contains(sphere))
+            {
+                return;
+            }
+            FramesPhase.Add(sphere);
+            DysonSphereLayer[] layers = sphere.layersIdBased;
+            for (int i = 1; i < layers.Length; i++)
+            {
+                DysonSphereLayer layer = layers[i];
+                if (layer == null || layer.id != i)
+                {
+                    continue;
+                }
+                DysonNode[] pool = layer.nodePool;
+                for (int j = 1; j < layer.nodeCursor; j++)
+                {
+                    DysonNode n = pool[j];
+                    if (n != null && n.id == j)
+                    {
+                        n.RecalcSpReq();
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 节点阶段把 _spReq 压缩为“仅节点本体缺口”，发射井就只会为每个节点精确下 30 发订单，
+    /// 不会多打一发；所有节点建成后恢复原版公式（节点+框架）。
+    /// </summary>
+    [HarmonyPatch(typeof(DysonNode), "RecalcSpReq")]
+    internal static class NodeRecalcSpReqPatch
+    {
+        private static readonly System.Reflection.FieldInfo SpReqField =
+            AccessTools.Field(typeof(DysonNode), "_spReq");
+
+        private static bool Prefix(DysonNode __instance)
+        {
+            if (!DspOptiModPlugin.FramesFirst.Value)
+            {
+                return true;
+            }
+            DysonSphere sphere = DysonSphereUtil.FindSphere(__instance);
+            if (sphere != null && !DysonSphereUtil.AllNodesBuilt(sphere))
+            {
+                lock (__instance)
+                {
+                    SpReqField.SetValue(__instance, __instance.spMax - __instance.sp);
+                }
+                return false;
+            }
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// 功能2：改变 ConstructSp 的分配顺序 —— 原版是"节点本体填满后，本节点的框架就能开始建"。
+    /// 这里改为：整颗戴森球【所有节点本体】全部建成后，才开始给框架分配结构点。
+    /// </summary>
+    [HarmonyPatch(typeof(DysonNode), "ConstructSp")]
+    internal static class NodeConstructSpPatch
+    {
 
         private static bool Prefix(DysonNode __instance, ref object __result)
         {
@@ -114,8 +181,8 @@ namespace DspOptiMod
                 if (__instance.sp >= __instance.spMax)
                 {
                     // 本节点已满，只有在全球节点都建成后才允许分给框架
-                    DysonSphere sphere = FindSphere(__instance);
-                    framesAllowed = sphere != null && AllNodesBuilt(sphere);
+                    DysonSphere sphere = DysonSphereUtil.FindSphere(__instance);
+                    framesAllowed = sphere != null && DysonSphereUtil.AllNodesBuilt(sphere);
                 }
                 if (framesAllowed)
                 {
@@ -153,7 +220,7 @@ namespace DspOptiMod
                 {
                     // 本节点已满且框架尚未开放：把结构点转移给同球其他未建满的节点，
                     // 避免火箭白白浪费（原版会转给框架，节点优先模式下框架被禁止）
-                    DysonSphere sphere = FindSphere(__instance);
+                    DysonSphere sphere = DysonSphereUtil.FindSphere(__instance);
                     if (sphere != null)
                     {
                         DysonSphereLayer[] layers = sphere.layersIdBased;
@@ -199,6 +266,12 @@ namespace DspOptiMod
                 __result = result;
             }
             __instance.RecalcSpReq();
+            // 节点阶段刚结束（最后一发节点火箭落地）时，恢复原版 _spReq 让发射井开始为框架下单
+            DysonSphere sphereAfter = DysonSphereUtil.FindSphere(__instance);
+            if (sphereAfter != null)
+            {
+                DysonSphereUtil.EnsureFramesPhaseRecalc(sphereAfter);
+            }
             return false;
         }
     }
