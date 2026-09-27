@@ -149,6 +149,48 @@ namespace DspOptiMod
                     __instance.sp++;
                     result = __instance;
                 }
+                if (result == null)
+                {
+                    // 本节点已满且框架尚未开放：把结构点转移给同球其他未建满的节点，
+                    // 避免火箭白白浪费（原版会转给框架，节点优先模式下框架被禁止）
+                    DysonSphere sphere = FindSphere(__instance);
+                    if (sphere != null)
+                    {
+                        DysonSphereLayer[] layers = sphere.layersIdBased;
+                        for (int li = 1; li < layers.Length && result == null; li++)
+                        {
+                            DysonSphereLayer layer = layers[li];
+                            if (layer == null || layer.id != li)
+                            {
+                                continue;
+                            }
+                            DysonNode[] pool = layer.nodePool;
+                            for (int nj = 1; nj < layer.nodeCursor; nj++)
+                            {
+                                DysonNode n = pool[nj];
+                                if (n != null && n.id == nj && n.sp < n.spMax)
+                                {
+                                    lock (n)
+                                    {
+                                        if (n.sp < n.spMax)
+                                        {
+                                            n.sp++;
+                                            result = n;
+                                        }
+                                    }
+                                    if (result != null)
+                                    {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (result is DysonNode donor)
+                        {
+                            donor.RecalcSpReq();
+                        }
+                    }
+                }
                 __instance.spOrdered--;
                 if (__instance.spOrdered < 0)
                 {
